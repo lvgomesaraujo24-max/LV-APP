@@ -451,9 +451,15 @@
     body{background:#fff;padding:0;font-size:9.5pt;color:#292524;
       -webkit-print-color-adjust:exact;print-color-adjust:exact}
     .wrap{max-width:none;gap:9px}
-    .card{border:1px solid #E7E5E4;box-shadow:none;border-radius:9px;
-      break-inside:avoid;page-break-inside:avoid}
+    .card{border:1px solid #E7E5E4;box-shadow:none;border-radius:9px}
     .pad{padding:12px 13px}
+
+    /* --- o que nunca pode partir no meio de uma página --- *
+     * Cards altos (metas, diagnóstico) precisam poder quebrar: travá-los
+     * inteiros jogava o bloco todo para a página seguinte e deixava meia
+     * página em branco. Protegemos só as unidades atômicas.            */
+    .kpi,.meta,.an,.fat,.acao,.hyd,.mw,tr{break-inside:avoid;page-break-inside:avoid}
+    .sec-head,h2{break-after:avoid;page-break-after:avoid}
 
     /* --- some tudo que só serve para editar --- */
     .no-print,.stbar,.tpl-bar,.add-meta,.btn,.ghost,.chev,.colx,.del,.addfat,
@@ -477,8 +483,13 @@
     .grid{grid-template-columns:1fr!important}
     .an-grid{grid-template-columns:repeat(3,1fr);gap:8px}
     div[style*="overflow-x"]{overflow:visible!important}
-    .chart{height:135px!important}
+    .chart{height:112px!important}
     canvas{max-width:100%!important}
+    /* as 4 semanas cabem numa faixa só, não em blocos empilhados */
+    #semanaCtrls{grid-template-columns:repeat(4,1fr)!important}
+
+    /* --- imprime só o que aconteceu, não o formulário em branco --- */
+    #fatores .fat:not(.on),#alertas .alerta:not(.on){display:none!important}
 
     /* --- tabelas legíveis, sem rolagem nem coluna fixa --- */
     #tabCarga,#tabBem,#tabDesconforto{min-width:0!important;width:100%;font-size:8.5pt}
@@ -497,8 +508,18 @@
 
     /* --- micro-metas: todas abertas e sem cara de acordeão --- */
     .meta-head{padding:11px 12px;cursor:default}
-    .meta-body{padding:0 12px 12px;gap:10px}
-    .meta{break-inside:avoid;page-break-inside:avoid}
+    .meta-body{padding:0 12px 12px;gap:8px}
+
+    /* O cabeçalho da meta já mostra semana, título, prioridade, status e
+     * indicador → alvo. Repetir tudo no corpo com os rótulos de edição
+     * ("Semana / período", "Como vamos medir"...) dobrava o tamanho do
+     * plano. No papel fica só o que o cabeçalho não diz: o porquê, as
+     * ações e o plano B.                                              */
+    .meta-body > .grid:has([data-f=semana]),
+    .meta-body > div:has(> .cats),
+    .meta-body > .grid:has(.seg),
+    .meta-body > .panel:has(.measure),
+    .meta-body > div:has([data-act=dup]){display:none!important}
     .seg button:not(.on),.cat:not(.on),.imp button:not(.on),.wks button:not(.on){display:none}
     .seg,.cats,.imp,.wks{gap:0}
     .seg button.on,.cat.on,.imp button.on,.wks button.on{flex:none;padding:3px 9px}

@@ -485,8 +485,16 @@
     div[style*="overflow-x"]{overflow:visible!important}
     .chart{height:112px!important}
     canvas{max-width:100%!important}
-    /* as 4 semanas cabem numa faixa só, não em blocos empilhados */
-    #semanaCtrls{grid-template-columns:repeat(4,1fr)!important}
+    /* As 4 semanas cabem numa faixa só, não em blocos empilhados.
+     * minmax(0,1fr) é obrigatório: item de grid tem min-width:auto e não
+     * encolhe abaixo do conteúdo — com 1fr puro o input do stepper (173px)
+     * esticava o card para 930px e cortava a Semana 4 na margem direita. */
+    #semanaCtrls{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+    .stepper input{width:100%!important;min-width:0!important}
+
+    /* nada pode forçar largura maior que a página */
+    .wrap>*,.grid>*,.card,.chart{min-width:0!important}
+    input::-webkit-calendar-picker-indicator{display:none!important}
 
     /* --- imprime só o que aconteceu, não o formulário em branco --- */
     #fatores .fat:not(.on),#alertas .alerta:not(.on){display:none!important}

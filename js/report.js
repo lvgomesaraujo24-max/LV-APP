@@ -1,7 +1,7 @@
-import { $, S, IMPACTOS, ALERTAS, CATEGORIAS, PRIORIDADES } from './state.js';
-import { adesao, badge, grupoBem, fmt1, mediaGrupo, evolucaoCarga, mediaDelta, deltaExercicio,
-         extremosCarga, media, mesLabel } from './derived.js';
-import { scoreHidratacao, classeHidratacao } from './ui.js';
+import { $, S, ALERTAS } from './state.js';
+import { adesao, badge, grupoBem, fmt1, mediaGrupo, evolucaoCarga,
+         extremosCarga, mesLabel } from './derived.js';
+import { scoreHidratacao, classeHidratacao, mediaAgua } from './ui.js';
 import { cicloAnterior, metricas, mesCurto, slug } from './persistence.js';
 
 /* ================================================================== *
@@ -11,122 +11,128 @@ export const CFG_MAIL = 'consultoria_email_cfg_v1';
 export const lerCfg = () => { try { return JSON.parse(localStorage.getItem(CFG_MAIL)) || {}; } catch { return {}; } };
 export const gravarCfg = c => { try { localStorage.setItem(CFG_MAIL, JSON.stringify(c)); } catch {} };
 
-export const linha = '─'.repeat(46);
 export const pctTxt = v => v === null || v === undefined ? '—' : (v > 0 ? '+' : '') + v + '%';
+
+/* ------------------------------------------------------------------ *
+ *  O relatório é montado UMA vez, como blocos estruturados, e depois
+ *  renderizado em dois formatos: texto (corpo do e-mail) e PDF.
+ *  Antes o PDF relia o texto já pronto e adivinhava por regex o que era
+ *  título ("linha em CAIXA ALTA com 6+ caracteres") — daí a formatação
+ *  irregular.
+ *
+ *  O que deliberadamente NÃO entra, por ser material de acompanhamento
+ *  seu e não leitura da aluna:
+ *    - S.obs ("Observações da sessão": contexto pessoal, o que reforçar
+ *      na próxima conversa) — antes ia inteiro no e-mail dela;
+ *    - percentuais dos pilares e classificação de impacto dos fatores;
+ *    - a tabela semana a semana de cada sub-fator de bem-estar.
+ * ------------------------------------------------------------------ */
+function relatorioBlocos(){
+  const B = [];
+  const ant = cicloAnterior();
+  const cmp = ant ? metricas(ant) : null;
+  /* variação contra o ciclo anterior — some quando não há base ou não mudou */
+  const vs = (atual, chave, un = '') => {
+    if (!cmp || cmp[chave] == null || atual == null) return '';
+    const d = Math.round((atual - cmp[chave]) * 10) / 10;
+    return d ? `  (${d > 0 ? '+' : ''}${fmt1(d)}${un} vs ${mesCurto(ant.mes)})` : '';
+  };
+
+  const primeiro = (S.aluna || '').trim().split(/\s+/)[0];
+  B.push({ t:'p', v: primeiro ? `Olá, ${primeiro}!` : 'Olá!' });
+  B.push({ t:'p', v:`Fechamos ${mesLabel()} — segue o resumo do seu ciclo.` });
+
+  /* --- como foi --- */
+  const a = adesao(), ev = evolucaoCarga();
+  B.push({ t:'h', v:'COMO FOI' });
+  B.push({ t:'li', v:`Treinos: ${S.realizados} de ${S.previstos} — ${a}% de adesão (${badge().txt})${vs(a,'adesao','pp')}` });
+  B.push({ t:'li', v:'Por semana: ' + S.semanas.map(s => `${s.nome.replace('Semana ','S')} ${s.realizado}/${s.previsto}`).join(' · ') });
+  B.push({ t:'li', v:`Evolução de carga: ${pctTxt(ev)}${vs(ev,'carga','pp')}` });
+  B.push({ t:'li', v:`Disposição ${fmt1(mediaGrupo(grupoBem('disposicao')))}/10 · Recuperação ${fmt1(mediaGrupo(grupoBem('recuperacao')))}/10` });
+  const sc = scoreHidratacao();
+  if (sc !== null)
+    B.push({ t:'li', v:`Hidratação: ${fmt1(mediaAgua())} L/dia — ${sc}% da meta (${classeHidratacao(sc).txt})` });
+
+  /* --- destaques de carga: só fazem sentido com 2+ exercícios medidos --- */
+  const ex = extremosCarga();
+  if (ex && ex.n > 1){
+    B.push({ t:'h', v:'DESTAQUES' });
+    B.push({ t:'li', v:`Maior evolução: ${ex.melhor.nome} ${pctTxt(ex.melhor.d)}` });
+    B.push({ t:'li', v:`Menor evolução: ${ex.pior.nome} ${pctTxt(ex.pior.d)}` });
+  }
+
+  /* --- blocos que só aparecem se houver o que dizer --- */
+  if (S.desconfortos.length){
+    B.push({ t:'h', v:'AJUSTES COMBINADOS' });
+    S.desconfortos.forEach(d => B.push({ t:'li',
+      v:`${d.exercicio || 'Exercício'} — ${d.regiao || 'queixa'}` +
+        `${d.dor != null ? ` (dor ${d.dor}/10)` : ''}: ${d.conduta}${d.ajuste ? ' — ' + d.ajuste : ''}` }));
+  }
+
+  const al = ALERTAS.filter(x => S.alertas[x.id]);
+  if (al.length){
+    B.push({ t:'h', v:'SINAIS PARA ACOMPANHAR' });
+    al.forEach(x => B.push({ t:'li', v:x.label }));
+    if (S.encaminhamento) B.push({ t:'li', v:`Encaminhamento: ${S.encaminhamento}` });
+  }
+
+  const lz = S.lazer.filter(x => x.feito && x.texto.trim());
+  if (lz.length)
+    B.push({ t:'h', v:'AUTOCUIDADO' },
+           { t:'li', v:`${lz.length} de ${S.lazer.length}: ` + lz.map(x => x.texto).join(', ') });
+
+  /* --- o plano: a parte acionável, e por isso a única detalhada --- */
+  if (S.metas.length){
+    B.push({ t:'h', v:'SEU PLANO PARA O PRÓXIMO CICLO' });
+    S.metas.forEach((m, i) => B.push({ t:'meta', n:i + 1, m }));
+  }
+
+  B.push({ t:'p', v:'Qualquer dúvida é só me chamar. Bom ciclo!' });
+  return B;
+}
+
+/** meta → "Meta: indicador → alvo unidade", ou '' se não houver indicador.
+ *  "%" cola no número; qualquer outra unidade ("kg", "sessões/sem") leva espaço. */
+const linhaMeta = m => {
+  if (!m.indicador) return '';
+  const un = (m.unidade || '').trim();
+  const alvo = String(m.alvo ?? '').trim();
+  return `Meta: ${m.indicador}` +
+    (alvo ? ` → ${alvo}${un ? (un === '%' ? un : ' ' + un) : ''}` : '');
+};
+
+/* O texto de contingência já costuma vir com a própria condição
+ * ("Se o dia apertar...", "Se a técnica quebrar..."), então um rótulo
+ * condicional duplicaria a frase. "Plano B" encaixa antes de qualquer uma. */
+const PLANO_B = 'Plano B: ';
 
 export function relatorioTexto(){
   const L = [];
-  const a = adesao(), b = badge();
-  const gd = grupoBem('disposicao'), gr = grupoBem('recuperacao');
-  const ant = cicloAnterior();
-  const cmp = ant ? metricas(ant) : null;
-  const vs = (atual, chave, un = '') => {
-    if (!cmp || cmp[chave] === null || atual === null) return '';
-    const d = Math.round((atual - cmp[chave]) * 10) / 10;
-    return `  (${d > 0 ? '+' : ''}${fmt1(d)}${un} vs ${mesCurto(ant.mes)})`;
-  };
-
-  L.push(`Olá, ${S.aluna.split(' ')[0]}!`, '',
-    `Segue o resumo do seu ciclo de ${mesLabel()}.`, '', linha, '');
-
-  /* 1. visão geral */
-  L.push('VISÃO GERAL', '',
-    `• Treinos: ${S.realizados} de ${S.previstos} previstos — ${a}% de adesão (${b.txt})${vs(a,'adesao','pp')}`,
-    `• Disposição: ${fmt1(mediaGrupo(gd))}/10${vs(mediaGrupo(gd),'disposicao','')}`,
-    `• Recuperação: ${fmt1(mediaGrupo(gr))}/10${vs(mediaGrupo(gr),'recuperacao','')}`,
-    `• Evolução de carga: ${pctTxt(evolucaoCarga())}${vs(evolucaoCarga(),'carga','pp')}`,
-    `• Hidratação: ${scoreHidratacao() === null ? 'sem registro' :
-        scoreHidratacao() + '% da meta (' + classeHidratacao(scoreHidratacao()).txt + ')'}`, '');
-
-  /* 2. frequência */
-  L.push('FREQUÊNCIA POR SEMANA', '');
-  S.semanas.forEach(s => L.push(`• ${s.nome}: ${s.realizado} de ${s.previsto} treinos`));
-  L.push('');
-
-  /* 3. cargas */
-  L.push('PROGRESSÃO DE CARGA', '');
-  Object.values(S.prog.grupos).forEach(g => {
-    if (!g.exercicios.length) return;
-    L.push(`${g.label.toUpperCase()} — média ${pctTxt(mediaDelta(g.exercicios))}`);
-    g.exercicios.forEach(e => {
-      const v = e.cargas.map(x => Number(x) || 0).filter(x => x > 0);
-      if (!v.length) return;
-      L.push(`  • ${e.nome || 'Sem nome'}: ${v[0]} kg → ${v[v.length-1]} kg  (${pctTxt(deltaExercicio(e))})`);
-    });
-    L.push('');
-  });
-  const ex = extremosCarga();
-  if (ex){
-    L.push(`Maior evolução: ${ex.melhor.nome} (${pctTxt(ex.melhor.d)})`,
-           `Menor evolução: ${ex.pior.nome} (${pctTxt(ex.pior.d)})`, '');
-  }
-
-  /* 4. bem-estar */
-  L.push('DISPOSIÇÃO E RECUPERAÇÃO', '');
-  S.bemestar.forEach(g => {
-    L.push(`${g.label.toUpperCase()} — média ${fmt1(mediaGrupo(g))}/10`);
-    g.itens.forEach(f => L.push(`  • ${f.label || '—'}: ${f.notas.map(n => n ?? '–').join(' | ')}  (média ${fmt1(media(f.notas))})`));
-    L.push('');
-  });
-
-  /* 5. hidratação */
-  const H = S.hidratacao;
-  L.push('HIDRATAÇÃO', '', `Meta: ${fmt1(Number(H.meta))} L por dia`);
-  S.semanas.forEach((s,i) => L.push(`  • ${s.nome}: ${H.semanas[i] ? fmt1(Number(H.semanas[i])) + ' L/dia' : 'sem registro'}`));
-  if (H.obs) L.push('', H.obs);
-  L.push('');
-
-  /* 6. pilares e autocuidado */
-  L.push('DISTRIBUIÇÃO DA ROTINA', '');
-  S.pilares.forEach(p => L.push(`• ${p.nome}: ${p.valor}%`));
-  const lz = S.lazer.filter(x => x.feito);
-  L.push('', `AUTOCUIDADO E LAZER — ${lz.length} de ${S.lazer.length} registros`);
-  if (lz.length) lz.forEach(x => L.push(`  ✓ ${x.texto}`));
-  L.push('');
-
-  /* 7. diagnóstico */
-  const fat = S.fatores.filter(f => f.ativo);
-  L.push('O QUE ATRAPALHOU A FREQUÊNCIA', '');
-  if (fat.length) fat.forEach(f => {
-    const sem = f.semanas.map((v,i) => v ? S.semanas[i].nome.replace('Semana ','S') : null).filter(Boolean);
-    L.push(`• ${f.label} — impacto ${IMPACTOS[f.impacto].label.toLowerCase()}${sem.length ? ' (' + sem.join(', ') + ')' : ''}`);
-  });
-  else L.push('Nenhum fator limitante registrado.');
-  L.push('');
-
-  if (S.desconfortos.length){
-    L.push('DESCONFORTOS E AJUSTES', '');
-    S.desconfortos.forEach(d => L.push(
-      `• ${d.exercicio || 'Exercício'} — ${d.regiao || 'queixa'}${d.dor != null ? ` (dor ${d.dor}/10)` : ''}`,
-      `  conduta: ${d.conduta}${d.ajuste ? ' — ' + d.ajuste : ''}`));
-    L.push('');
-  }
-  const al = ALERTAS.filter(x => S.alertas[x.id]);
-  if (al.length){
-    L.push('PONTOS DE ATENÇÃO', '');
-    al.forEach(x => L.push(`• ${x.label}`));
-    if (S.encaminhamento) L.push(`Encaminhamento sugerido: ${S.encaminhamento}`);
-    L.push('');
-  }
-  if (S.obs) L.push('OBSERVAÇÕES DA SESSÃO', '', S.obs, '');
-
-  /* 8. micro-metas */
-  L.push(linha, '', 'SEU PLANO PARA O PRÓXIMO CICLO', '');
-  S.metas.forEach(m => {
-    L.push(`${m.semana.toUpperCase()} — ${m.titulo}`);
-    L.push(`Pilar: ${CATEGORIAS[m.categoria].label} · Prioridade ${PRIORIDADES[m.prioridade].label.toLowerCase()}`);
-    if (m.indicador) L.push(`Meta: ${m.indicador} → ${m.alvo} ${m.unidade}`.trim());
-    if (m.detalhe) L.push(`Por quê: ${m.detalhe}`);
-    if (m.acoes.length){
-      L.push('Ações:');
-      m.acoes.forEach(x => L.push(`  ${x.feito ? '✓' : '□'} ${x.texto}`));
+  relatorioBlocos().forEach(b => {
+    switch (b.t){
+      case 'p':
+        if (L.length && L[L.length - 1] !== '') L.push('');
+        L.push(b.v, '');
+        break;
+      case 'h':
+        if (L.length && L[L.length - 1] !== '') L.push('');
+        L.push(b.v);
+        break;
+      case 'li':
+        L.push('• ' + b.v);
+        break;
+      case 'meta': {
+        const m = b.m;
+        L.push('', `${b.n}. ${m.semana} — ${m.titulo}`);
+        const lm = linhaMeta(m);
+        if (lm) L.push('   ' + lm);
+        m.acoes.forEach(x => { if (x.texto.trim()) L.push(`   • ${x.texto}`); });
+        if (m.contingencia) L.push(`   ${PLANO_B}${m.contingencia}`);
+        break;
+      }
     }
-    if (m.contingencia) L.push(`Plano B: ${m.contingencia}`);
-    L.push('');
   });
-
-  L.push(linha, '', 'Qualquer dúvida é só me chamar. Bom ciclo!');
-  return L.join('\n');
+  return L.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
 }
 
 export function gerarPreview(){
@@ -135,51 +141,103 @@ export function gerarPreview(){
 }
 
 /* ---- PDF do relatório, gerado na própria página ---- */
-export const nomeArquivo = () =>
-  `relatorio-${slug(S.aluna)}-${S.mes}.pdf`;
+export const nomeArquivo = () => `relatorio-${slug(S.aluna)}-${S.mes}.pdf`;
 
 export function gerarPDF(baixar = true){
   const { jsPDF } = window.jspdf || {};
   if (!jsPDF) throw new Error('biblioteca de PDF não carregou');
 
   const doc = new jsPDF({ unit:'mm', format:'a4' });
-  const M = 16, W = 210, LARG = W - M*2;
+  const M = 18, W = 210, LARG = W - M * 2, RODAPE = 272;
   let y = 0, pag = 1;
 
   const rodape = () => {
-    doc.setFont('helvetica','normal').setFontSize(7.5).setTextColor(160);
-    doc.text('Consultoria de Treino · relatório de acompanhamento mensal', M, 287);
-    doc.text(String(pag), W - M, 287, { align:'right' });
+    doc.setFont('helvetica','normal').setFontSize(7.5).setTextColor(168);
+    doc.text('Consultoria de Treino · acompanhamento mensal', M, 288);
+    doc.text(String(pag), W - M, 288, { align:'right' });
   };
-  const novaPagina = () => { rodape(); doc.addPage(); pag++; y = M + 4; };
-  const espaco = h => { if (y + h > 275) novaPagina(); };
+  const novaPagina = () => { rodape(); doc.addPage(); pag++; y = M; };
+  const espaco = h => { if (y + h > RODAPE) novaPagina(); };
 
-  /* faixa de capa */
-  doc.setFillColor(232,180,184); doc.rect(0, 0, W, 3, 'F');
-  y = M + 6;
-  doc.setFont('helvetica','bold').setFontSize(17).setTextColor(30);
-  doc.text(S.aluna || 'Aluna', M, y); y += 7;
-  doc.setFont('helvetica','normal').setFontSize(10.5).setTextColor(120);
-  doc.text(`Acompanhamento de ${mesLabel()}  ·  adesão ${adesao()}% (${badge().txt})`, M, y);
-  y += 5;
-  doc.setDrawColor(230).line(M, y, W - M, y); y += 7;
+  /* As fontes padrão do jsPDF falam Windows-1252. O que está fora dessa
+   * tabela vira lixo — "◦" saía impresso como "%æ" — ou força a string
+   * inteira para UTF-16. Trocamos os poucos símbolos que usamos por
+   * equivalentes válidos e descartamos o resto (um emoji colado, por
+   * exemplo). Atenção: cp1252 NÃO é Latin-1 — travessão, aspas curvas e
+   * "•" são válidos apesar do code point passar de \xFF, então não podem
+   * entrar no descarte. O corpo do e-mail mantém os caracteres originais. */
+  const CP1252 = '\\u20AC\\u201A\\u0192\\u201E\\u2026\\u2020\\u2021\\u02C6\\u2030\\u0160' +
+                 '\\u2039\\u0152\\u017D\\u2018\\u2019\\u201C\\u201D\\u2022\\u2013\\u2014' +
+                 '\\u02DC\\u2122\\u0161\\u203A\\u0153\\u017E\\u0178';
+  const foraDaTabela = new RegExp(`[^\\x00-\\xFF${CP1252}]`, 'g');
+  const ansi = s => String(s)
+    .replace(/→/g, '–').replace(/[◦∘]/g, '-')
+    .replace(/[✓✔]/g, 'v').replace(/[─―]/g, '—')
+    .replace(foraDaTabela, '');
 
-  /* corpo: mesmo texto do e-mail, com títulos destacados */
-  const linhas = $('mailCorpo').value.split('\n');
-  linhas.forEach(ln => {
-    const t = ln.trimEnd();
-    if (!t){ y += 3; return; }
-    if (/^─+$/.test(t)){ espaco(6); doc.setDrawColor(235).line(M, y, W - M, y); y += 5; return; }
+  /** escreve com quebra de linha e recuo; devolve a altura consumida */
+  const escreve = (txt, { size = 9.6, estilo = 'normal', cor = 70, recuo = 0, gap = 4.6 } = {}) => {
+    doc.setFont('helvetica', estilo).setFontSize(size).setTextColor(cor);
+    doc.splitTextToSize(ansi(txt), LARG - recuo).forEach(l => {
+      espaco(gap);
+      doc.text(l, M + recuo, y);
+      y += gap;
+    });
+  };
 
-    const titulo = /^[A-ZÁÂÃÀÉÊÍÓÔÕÚÇ0-9 ,\/&()–-]{6,}$/.test(t) && !t.startsWith('•');
-    doc.setFont('helvetica', titulo ? 'bold' : 'normal')
-       .setFontSize(titulo ? 10 : 9.4)
-       .setTextColor(titulo ? 40 : 70);
-    if (titulo) y += 2;
+  /* --- capa --- */
+  doc.setFillColor(232,180,184); doc.rect(0, 0, W, 3.5, 'F');
+  y = M + 4;
+  escreve(S.aluna || 'Aluna', { size:18, estilo:'bold', cor:32, gap:7.5 });
+  escreve(`Acompanhamento de ${mesLabel()}`, { size:10.5, cor:128, gap:5.4 });
+  y += 1.5;
+  doc.setDrawColor(228).line(M, y, W - M, y);
+  y += 7;
 
-    const wrap = doc.splitTextToSize(t, LARG);
-    wrap.forEach(w => { espaco(5.4); doc.text(w, M, y); y += 4.7; });
-    if (titulo) y += 1.2;
+  relatorioBlocos().forEach(b => {
+    switch (b.t){
+      case 'p':
+        escreve(b.v, { size:10, cor:62 });
+        y += 3;
+        break;
+
+      case 'h':
+        /* título junto com pelo menos um item: nunca sozinho no pé */
+        espaco(16);
+        y += 3.5;
+        escreve(b.v, { size:8.3, estilo:'bold', cor:152, gap:4.2 });
+        doc.setDrawColor(234).line(M, y - 2.4, W - M, y - 2.4);
+        y += 1.8;
+        break;
+
+      case 'li':
+        espaco(6);
+        doc.setFont('helvetica','normal').setFontSize(9.6).setTextColor(70);
+        doc.text('•', M, y);
+        escreve(b.v, { recuo:4.5 });
+        y += 0.8;
+        break;
+
+      case 'meta': {
+        const m = b.m;
+        espaco(22);
+        y += 2.8;
+        escreve(`${b.n}. ${m.semana} — ${m.titulo}`, { size:10, estilo:'bold', cor:38, gap:5 });
+        const lm = linhaMeta(m);
+        if (lm) escreve(lm, { size:9.2, cor:112, recuo:4.5, gap:4.4 });
+        m.acoes.forEach(x => {
+          if (!x.texto.trim()) return;
+          espaco(5.4);
+          doc.setFont('helvetica','normal').setFontSize(9.4).setTextColor(78);
+          doc.text('-', M + 4.5, y);
+          escreve(x.texto, { size:9.4, recuo:9, gap:4.4 });
+        });
+        if (m.contingencia)
+          escreve(`${PLANO_B}${m.contingencia}`, { size:9, cor:122, recuo:4.5, gap:4.3 });
+        y += 2.8;
+        break;
+      }
+    }
   });
   rodape();
 

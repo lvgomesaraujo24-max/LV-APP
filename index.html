@@ -1176,6 +1176,7 @@ const S = {
   desconfortos:[ novoDesconforto('Agachamento livre','Joelho direito') ],
   alertas:{},
   encaminhamento:'',
+  obs:'',
   email:'',
   metas: metasPadrao(),
   aberta: null,
@@ -1279,15 +1280,6 @@ function stepper(host, get, set, { min=0, max=99, suffix='' } = {}){
   inp.oninput = () => { set(clamp(+inp.value || 0)); sync(); };
 }
 
-function scorePicker(host, get, set, cor){
-  host.innerHTML = Array.from({length:10}, (_,i) =>
-    `<button data-n="${i+1}" class="${get() === i+1 ? 'on' : ''}"
-      style="${get() === i+1 ? `background:${cor}` : ''}">${i+1}</button>`).join('');
-  host.querySelectorAll('button').forEach(b => b.onclick = () => {
-    set(+b.dataset.n); scorePicker(host, get, set, cor); sync();
-  });
-}
-
 /* ================================================================== *
  *  GRÁFICOS
  * ================================================================== */
@@ -1344,7 +1336,7 @@ function renderSemanas(){
     `<div style="border:1px solid var(--s200);background:rgba(250,250,249,.5);border-radius:12px;padding:11px">
        <p class="label" style="margin-bottom:8px">${s.nome}</p><span id="stSem${i}"></span></div>`).join('');
   S.semanas.forEach((s,i) => stepper($('stSem' + i),
-    () => S.semanas[i].realizado, v => S.semanas[i].realizado = v, { max:14, suffix:'/' + s.previsto }));
+    () => S.semanas[i].realizado, v => { S.semanas[i].realizado = v; dirty.freq = true; }, { max:14, suffix:'/' + s.previsto }));
 }
 
 function renderProgressao(){
@@ -1355,7 +1347,7 @@ function renderProgressao(){
     `<button data-g="${k}" class="${P.ativo===k?'on':''}">${g.label}
        <span class="cnt">${g.exercicios.length}</span></button>`).join('');
   $('grupoTabs').querySelectorAll('button').forEach(b => b.onclick = () => {
-    P.ativo = b.dataset.g; renderProgressao(); sync();
+    P.ativo = b.dataset.g; renderProgressao(); dirty.carga = true; sync();
   });
 
   /* --- tabela: colunas = sessões datadas --- */
@@ -1384,7 +1376,7 @@ function renderProgressao(){
 
   /* datas */
   $('tabCarga').querySelectorAll('.date-in').forEach(inp => inp.onchange = () => {
-    P.sessoes[+inp.dataset.s].data = inp.value; sync();
+    P.sessoes[+inp.dataset.s].data = inp.value; dirty.carga = true; sync();
   });
   /* remover sessão (coluna) */
   $('tabCarga').querySelectorAll('[data-delcol]').forEach(b => b.onclick = () => {
@@ -1392,15 +1384,15 @@ function renderProgressao(){
     const i = +b.dataset.delcol;
     P.sessoes.splice(i, 1);
     Object.values(P.grupos).forEach(gr => gr.exercicios.forEach(e => e.cargas.splice(i, 1)));
-    renderProgressao(); sync();
+    renderProgressao(); dirty.carga = true; sync();
   });
   /* nome do exercício — sem re-render, preserva o cursor */
   $('tabCarga').querySelectorAll('.ex-name').forEach(inp => inp.oninput = () => {
-    g.exercicios[+inp.dataset.ex].nome = inp.value; sync();
+    g.exercicios[+inp.dataset.ex].nome = inp.value; dirty.carga = true; sync();
   });
   /* remover exercício */
   $('tabCarga').querySelectorAll('[data-delex]').forEach(b => b.onclick = () => {
-    g.exercicios.splice(+b.dataset.delex, 1); renderProgressao(); sync();
+    g.exercicios.splice(+b.dataset.delex, 1); renderProgressao(); dirty.carga = true; sync();
   });
   /* cargas */
   $('tabCarga').querySelectorAll('.cell-in').forEach(inp => inp.oninput = () => {
@@ -1410,7 +1402,7 @@ function renderProgressao(){
     const d = deltaExercicio(e);
     row.textContent = d === null ? '—' : (d > 0 ? '+' : '') + d + '%';
     row.style.color = d === null ? 'var(--s300)' : d > 0 ? 'var(--baixa)' : d < 0 ? 'var(--alta)' : 'var(--s400)';
-    sync();
+    dirty.carga = true; sync();
   });
 
   $('addExercicio').innerHTML = svg('plus',12,2.5) + ' Exercício em ' + g.label.toLowerCase();
@@ -1512,21 +1504,21 @@ function renderBemEstar(){
     const cel = inp.closest('tr').querySelector('.media-cell');
     const m = media(S.bemestar[+inp.dataset.g].itens[+inp.dataset.f].notas);
     cel.textContent = fmt1(m); cel.style.color = corNota(m);
-    sync();
+    dirty.bem = true; sync();
   });
   $('tabBem').querySelectorAll('.ex-name').forEach(inp => inp.oninput = () => {
-    S.bemestar[+inp.dataset.g].itens[+inp.dataset.f].label = inp.value; sync();
+    S.bemestar[+inp.dataset.g].itens[+inp.dataset.f].label = inp.value; dirty.bem = true; sync();
   });
   $('tabBem').querySelectorAll('[data-addfat]').forEach(b => b.onclick = () => {
     S.bemestar[+b.dataset.addfat].itens.push({ id:uid(), label:'', notas:S.semanas.map(()=>null) });
-    renderBemEstar(); sync();
+    renderBemEstar(); dirty.bem = true; sync();
     const ns = $('tabBem').querySelectorAll('.ex-name');
     [...ns].reverse().find(i => !i.value)?.focus();
   });
   $('tabBem').querySelectorAll('[data-delfat]').forEach(b => b.onclick = () => {
     const [gi,fi] = b.dataset.delfat.split(':').map(Number);
     if (S.bemestar[gi].itens.length <= 1) return;
-    S.bemestar[gi].itens.splice(fi,1); renderBemEstar(); sync();
+    S.bemestar[gi].itens.splice(fi,1); renderBemEstar(); dirty.bem = true; sync();
   });
 }
 
@@ -1576,7 +1568,7 @@ function renderHidratacao(){
 
   $('hidSemanas').querySelectorAll('input').forEach(inp => inp.oninput = () => {
     H.semanas[+inp.dataset.i] = inp.value === '' ? null : (+inp.value || 0);
-    atualizaHidratacao(); sync();
+    atualizaHidratacao(); dirty.pilares = true; sync();
   });
   atualizaHidratacao();
 }
@@ -1653,7 +1645,7 @@ function renderPilares(){
     const i = +r.dataset.i; S.pilares[i].valor = +r.value;
     $('pv' + i).textContent = r.value + '%';
     r.style.background = `linear-gradient(90deg,${S.pilares[i].cor} ${r.value}%,#EDEAE6 ${r.value}%)`;
-    sync();
+    dirty.pilares = true; sync();
   });
 }
 
@@ -1936,9 +1928,16 @@ function renderDistribuicao(){
 
 /* ================================================================== *
  *  SYNC — recalcula tudo o que é derivado
+ *  As 4 seções abaixo (bem-estar, carga, frequência, pilares) fazem
+ *  redraw de canvas (Chart.js) ou reconstrução de DOM — caras demais
+ *  para rodar a cada tecla em QUALQUER campo do app. `dirty` marca só
+ *  a seção realmente afetada pela última mudança; o resto é ignorado
+ *  até o próprio campo relevante mudar de novo.
  * ================================================================== */
+const dirty = { bem:true, carga:true, freq:true, pilares:true };
+
 function sync(){
-  const a = adesao(), b = badge(), ev = evolucaoCarga(), pp = progressoPlano();
+  const a = adesao(), b = badge(), pp = progressoPlano();
 
   $('avatar').textContent = iniciais() || '·';
   $('mesLabel').textContent = mesLabel();
@@ -1949,29 +1948,49 @@ function sync(){
   $('kpiTreinos').textContent = S.realizados + '/' + S.previstos;
   $('kpiTreinosHint').textContent = a + '% do previsto no mês';
   $('barTreinos').style.width = Math.min(a,100) + '%';
-  const gd = grupoBem('disposicao'), gr = grupoBem('recuperacao');
-  const md = mediaGrupo(gd), mr = mediaGrupo(gr);
-  $('kpiEnergia').innerHTML = fmt1(md) + '<span>/10</span>';
-  $('kpiRecup').innerHTML   = fmt1(mr) + '<span>/10</span>';
-  $('hintEnergia').textContent = 'Média de ' + gd.itens.map(f => (f.label||'—').toLowerCase()).join(', ');
-  $('hintRecup').textContent   = 'Média de ' + gr.itens.map(f => (f.label||'—').toLowerCase()).join(', ');
-  renderMini('miniDisposicao', gd);
-  renderMini('miniRecuperacao', gr);
 
-  chartBem.data.labels = S.semanas.map(s => s.nome);
-  chartBem.data.datasets = S.bemestar.map(g => ({
-    label:g.label, data:S.semanas.map((_,i) => mediaSemana(g,i)),
-    borderColor:g.cor, backgroundColor:g.cor + '33', fill:true, tension:.35,
-    borderWidth:2, pointRadius:3, pointBackgroundColor:'#fff', pointBorderWidth:2, spanGaps:true
-  }));
-  chartBem.update('none');
+  if (dirty.bem){
+    const gd = grupoBem('disposicao'), gr = grupoBem('recuperacao');
+    const md = mediaGrupo(gd), mr = mediaGrupo(gr);
+    $('kpiEnergia').innerHTML = fmt1(md) + '<span>/10</span>';
+    $('kpiRecup').innerHTML   = fmt1(mr) + '<span>/10</span>';
+    $('hintEnergia').textContent = 'Média de ' + gd.itens.map(f => (f.label||'—').toLowerCase()).join(', ');
+    $('hintRecup').textContent   = 'Média de ' + gr.itens.map(f => (f.label||'—').toLowerCase()).join(', ');
+    renderMini('miniDisposicao', gd);
+    renderMini('miniRecuperacao', gr);
 
-  $('bemHint').textContent = S.bemestar.reduce((n,g) => n + g.itens.length, 0) +
-    ' sub-fatores · ' + S.semanas.length + ' semanas';
+    chartBem.data.labels = S.semanas.map(s => s.nome);
+    chartBem.data.datasets = S.bemestar.map(g => ({
+      label:g.label, data:S.semanas.map((_,i) => mediaSemana(g,i)),
+      borderColor:g.cor, backgroundColor:g.cor + '33', fill:true, tension:.35,
+      borderWidth:2, pointRadius:3, pointBackgroundColor:'#fff', pointBorderWidth:2, spanGaps:true
+    }));
+    chartBem.update('none');
+
+    $('bemHint').textContent = S.bemestar.reduce((n,g) => n + g.itens.length, 0) +
+      ' sub-fatores · ' + S.semanas.length + ' semanas';
+    dirty.bem = false;
+  }
+
   $('lazerCont').textContent = S.lazer.filter(a => a.feito).length + '/' + S.lazer.length + ' realizados';
-  renderAnalise();
-  $('kpiCarga').innerHTML = (ev > 0 ? '+' : '') + ev + '<span>%</span>';
-  $('barCarga').style.width = Math.min(Math.abs(ev) * 2, 100) + '%';
+
+  if (dirty.carga){
+    const ev = evolucaoCarga();
+    renderAnalise();
+    $('kpiCarga').innerHTML = (ev > 0 ? '+' : '') + ev + '<span>%</span>';
+    $('barCarga').style.width = Math.min(Math.abs(ev) * 2, 100) + '%';
+
+    const g = grupoAtivo();
+    chartCarga.data.labels = S.prog.sessoes.map(labelSessao);
+    chartCarga.data.datasets = g.exercicios.map(e => ({
+      label: e.nome || 'Sem nome',
+      data: e.cargas.map(v => (v === '' || v == null) ? null : Number(v)),
+      borderColor:e.cor, backgroundColor:e.cor + '33', fill:true, tension:.35,
+      borderWidth:2, pointRadius:3, pointBackgroundColor:'#fff', pointBorderWidth:2, spanGaps:true
+    }));
+    chartCarga.update('none');
+    dirty.carga = false;
+  }
 
   $('planoPct').textContent = pp + '%';
   $('planoBar').style.width = pp + '%';
@@ -1988,20 +2007,18 @@ function sync(){
     (S.desconfortos.length ? ` · ${S.desconfortos.length} desconforto${S.desconfortos.length>1?'s':''}` : '') +
     (nAlertas ? ` · ${nAlertas} sinal${nAlertas>1?'is':''} de atenção` : '');
 
-  chartFreq.data.datasets[0].data = S.semanas.map(s => s.previsto);
-  chartFreq.data.datasets[1].data = S.semanas.map(s => s.realizado);
-  chartFreq.update('none');
-  const g = grupoAtivo();
-  chartCarga.data.labels = S.prog.sessoes.map(labelSessao);
-  chartCarga.data.datasets = g.exercicios.map(e => ({
-    label: e.nome || 'Sem nome',
-    data: e.cargas.map(v => (v === '' || v == null) ? null : Number(v)),
-    borderColor:e.cor, backgroundColor:e.cor + '33', fill:true, tension:.35,
-    borderWidth:2, pointRadius:3, pointBackgroundColor:'#fff', pointBorderWidth:2, spanGaps:true
-  }));
-  chartCarga.update('none');
-  chartPilares.data.datasets[0].data = S.pilares.map(p => p.valor);
-  chartPilares.update('none');
+  if (dirty.freq){
+    chartFreq.data.datasets[0].data = S.semanas.map(s => s.previsto);
+    chartFreq.data.datasets[1].data = S.semanas.map(s => s.realizado);
+    chartFreq.update('none');
+    dirty.freq = false;
+  }
+
+  if (dirty.pilares){
+    chartPilares.data.datasets[0].data = S.pilares.map(p => p.valor);
+    chartPilares.update('none');
+    dirty.pilares = false;
+  }
 
   $('btnConcluir').classList.toggle('done', !!S.concluida);
   $('btnConcluirTxt').textContent = S.concluida ? 'Reunião concluída' : 'Concluir reunião';
@@ -2173,7 +2190,9 @@ function renderTudo(){
   stepper($('stRealizados'), () => S.realizados, v => S.realizados = v, { max:40 });
   renderSemanas(); renderProgressao(); renderHidratacao(); renderPilares();
   renderBemEstar(); renderLazer(); renderFatores(); renderDesconfortos();
-  renderAlertas(); renderMetas(); renderCiclos(); sync();
+  renderAlertas(); renderMetas(); renderCiclos();
+  dirty.bem = dirty.carga = dirty.freq = dirty.pilares = true;
+  sync();
 }
 
 /* ================================================================== *
@@ -2410,14 +2429,14 @@ $('aluna').onchange = () => carregarAtual();
 $('mes').onchange   = e => { S.mes = e.target.value; carregarAtual(); };
 $('obs').oninput            = e => { S.obs = e.target.value; salvar(); };
 $('hidObs').oninput  = e => { S.hidratacao.obs = e.target.value; salvar(); };
-$('hidMeta').oninput = e => { S.hidratacao.meta = +e.target.value || 0; atualizaHidratacao(); sync(); };
+$('hidMeta').oninput = e => { S.hidratacao.meta = +e.target.value || 0; atualizaHidratacao(); dirty.pilares = true; sync(); };
 $('hidPeso').oninput = e => { S.hidratacao.peso = e.target.value === '' ? null : (+e.target.value || 0); atualizaHidratacao(); salvar(); };
 $('hidSugerir').onclick = () => {
   const kg = S.hidratacao.peso;
   if (!kg){ $('hidPeso').focus(); return; }
   S.hidratacao.meta = metaPorPeso(kg);
   $('hidMeta').value = S.hidratacao.meta;
-  atualizaHidratacao(); sync();
+  atualizaHidratacao(); dirty.pilares = true; sync();
 };
 $('encaminhamento').oninput = e => { S.encaminhamento = e.target.value; salvar(); };
 
@@ -2513,14 +2532,14 @@ $('addExercicio').onclick = () => {
   const g = grupoAtivo();
   g.exercicios.push({ id:uid(), nome:'', cor:proxCor(todosExercicios()),
     cargas:S.prog.sessoes.map(() => null) });
-  renderProgressao(); sync();
+  renderProgressao(); dirty.carga = true; sync();
   const inputs = $('tabCarga').querySelectorAll('.ex-name');
   inputs[inputs.length - 1]?.focus();
 };
 $('addSessao').onclick = () => {
   S.prog.sessoes.push({ id:uid(), data:proximaData() });
   Object.values(S.prog.grupos).forEach(gr => gr.exercicios.forEach(e => e.cargas.push(null)));
-  renderProgressao(); sync();
+  renderProgressao(); dirty.carga = true; sync();
 };
 
 $('addMeta').onclick = () => {

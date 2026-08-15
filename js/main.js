@@ -4,7 +4,8 @@ import { atualizaHidratacao, metaPorPeso, dirty, sync, renderTemplates, renderFa
          renderLazer, renderProgressao, renderMetas, scoreHidratacao, proximaData } from './ui.js';
 import { carregarAtual, aplicar, lerStore, gravarStore, renderCiclos, salvar, mesCurto,
          modalConfirm, modalAlert, renderTudo } from './persistence.js';
-import { gerarPreview, gerarPDF, enviarEmail, statusMail, lerCfg, gravarCfg, pctTxt } from './report.js';
+import { gerarPreview, gerarPDF, enviarEmail, statusMail, lerCfg, gravarCfg, pctTxt,
+         VARS_TEMPLATE } from './report.js';
 
 /* ================================================================== *
  *  BOOT
@@ -157,9 +158,23 @@ $('btnCfgMail').onclick = () => {
   const c = $('cfgMail');
   c.style.display = c.style.display === 'none' ? '' : 'none';
 };
+
+/* lista de variáveis do template, clicáveis para copiar */
+$('varsTemplate').innerHTML = VARS_TEMPLATE
+  .map(v => `<button class="tpl" data-v="{{${v}}}">{{${v}}}</button>`).join('');
+$('varsTemplate').querySelectorAll('[data-v]').forEach(b => b.onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(b.dataset.v);
+    const antes = b.textContent;
+    b.textContent = 'copiado!';
+    setTimeout(() => { b.textContent = antes; }, 1200);
+  } catch { /* sem permissão de área de transferência: o texto já está visível */ }
+});
+
+$('btnTesteMail').onclick = () => enviarEmail({ teste:true });
 $('mailPara').oninput = e => { S.email = e.target.value; salvar(); };
 $('btnPreview').onclick = gerarPreview;
-$('btnEnviar').onclick  = enviarEmail;
+$('btnEnviar').onclick  = () => enviarEmail();
 $('btnCopiar').onclick  = async () => {
   try { await navigator.clipboard.writeText($('mailCorpo').value); statusMail('Texto copiado.', 'var(--baixa)'); }
   catch { $('mailCorpo').select(); statusMail('Selecione e copie manualmente.', 'var(--media)'); }

@@ -352,6 +352,19 @@
         As credenciais ficam salvas neste navegador e valem para todas as alunas. A chave pública do EmailJS
         é visível no código da página — restrinja o domínio nas configurações da conta para evitar uso indevido.
       </p>
+
+      <div style="margin-top:12px;border-top:1px solid var(--s200);padding-top:11px">
+        <span class="mini-lb">O template no EmailJS precisa usar estas variáveis</span>
+        <div class="row" style="gap:5px;flex-wrap:wrap;margin:6px 0 7px" id="varsTemplate"></div>
+        <p class="tiny muted" style="margin:0">
+          No template, o campo <b>To Email</b> tem que ser <code>{{to_email}}</code> e o corpo precisa conter
+          <code>{{message}}</code> — se o nome não bater, o e-mail chega em branco e o EmailJS não acusa erro.
+        </p>
+        <button class="ghost outline" id="btnTesteMail" style="margin-top:10px">
+          Enviar teste para mim
+        </button>
+        <p class="tiny muted" style="margin-top:6px">Usa o endereço de "Responder para" — valida o setup sem escrever para a aluna.</p>
+      </div>
     </div>
 
     <div class="grid" style="grid-template-columns:minmax(240px,300px) 1fr">

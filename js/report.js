@@ -250,17 +250,51 @@ export function statusMail(txt, cor){
   $('mailStatus').style.color = cor || 'var(--s500)';
 }
 
-export async function enviarEmail(){
+/* As variáveis que o app manda para o template. O template no EmailJS só
+ * preenche o que ele mesmo referencia como {{nome}} — usar outro nome faz
+ * o e-mail chegar em branco sem nenhum erro, que é a falha mais comum
+ * nesse setup. A tela de configuração mostra esta lista para conferência. */
+export const VARS_TEMPLATE = ['to_email','to_name','reply_to','subject','message','mes','adesao'];
+
+/* O EmailJS responde com texto curto em inglês e status HTTP. Traduzimos
+ * para a ação concreta que resolve cada caso. */
+function explicaErro(status, txt){
+  const t = (txt || '').toLowerCase();
+  if (t.includes('public key') || t.includes('user_id'))
+    return 'A Public Key está incorreta — confira em Account › General.';
+  if (t.includes('service id') || t.includes('service not found'))
+    return 'Service ID não encontrado — confira em Email Services.';
+  if (t.includes('template id') || t.includes('template not found'))
+    return 'Template ID não encontrado — confira em Email Templates.';
+  if (t.includes('recipients address is empty') || t.includes('recipient'))
+    return 'O template não sabe para quem enviar: no EmailJS, o campo "To Email" do template precisa ser {{to_email}}.';
+  if (t.includes('non-browser'))
+    return 'A conta está bloqueando chamadas do navegador — desmarque "Allow EmailJS API for non-browser applications" em Account › Security.';
+  if (status === 403 || t.includes('origin'))
+    return `Este domínio não está liberado: adicione ${location.origin} na lista de Domains em Account › Security.`;
+  if (status === 402 || t.includes('quota') || t.includes('limit reached'))
+    return 'Cota do plano do EmailJS esgotada neste mês.';
+  if (status === 429) return 'Muitos envios seguidos — espere alguns segundos.';
+  return (txt || 'erro desconhecido').slice(0, 140);
+}
+
+/** Envia o relatório. Com { teste:true } manda para o "Responder para".
+ *  A opção vai num objeto, e não como string solta, porque a função também
+ *  é usada como handler de clique — aí o primeiro argumento é o evento. */
+export async function enviarEmail(opcoes){
   const cfg = lerCfg();
-  const para = $('mailPara').value.trim();
+  const teste = opcoes?.teste === true;
+  const para = (teste ? $('mailResponder').value : $('mailPara').value).trim();
+
   if (!cfg.service || !cfg.template || !cfg.key){
     $('cfgMail').style.display = '';
-    return statusMail('Preencha as credenciais do EmailJS para enviar.', 'var(--alta)');
+    return statusMail('Preencha Service ID, Template ID e Public Key para enviar.', 'var(--alta)');
   }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(para))
-    return statusMail('Informe um e-mail válido para a aluna.', 'var(--alta)');
+    return statusMail(teste ? 'Preencha "Responder para" com o seu e-mail para receber o teste.'
+                            : 'Informe um e-mail válido para a aluna.', 'var(--alta)');
 
-  statusMail('Enviando...', 'var(--s500)');
+  statusMail(teste ? 'Enviando teste...' : 'Enviando...', 'var(--s500)');
   try {
     const r = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
       method:'POST', headers:{ 'Content-Type':'application/json' },
@@ -268,20 +302,27 @@ export async function enviarEmail(){
         service_id: cfg.service, template_id: cfg.template, user_id: cfg.key,
         template_params:{
           to_email: para,
-          to_name: S.aluna,
+          to_name: teste ? 'teste de configuração' : S.aluna,
           reply_to: $('mailResponder').value.trim(),
-          subject: $('mailAssunto').value,
+          subject: (teste ? '[TESTE] ' : '') + $('mailAssunto').value,
           message: $('mailCorpo').value,
           mes: mesLabel(),
           adesao: adesao() + '%'
         }
       })
     });
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) throw new Error(explicaErro(r.status, await r.text()));
     const h = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-    statusMail(`Enviado para ${para} às ${h}.`, 'var(--baixa)');
+    statusMail(teste
+      ? `Teste enviado para ${para} às ${h}. Confira se o corpo chegou preenchido.`
+      : `Enviado para ${para} às ${h}.`, 'var(--baixa)');
   } catch(err){
-    statusMail('Não foi possível enviar: ' + String(err.message || err).slice(0,120), 'var(--alta)');
+    /* fetch rejeitado (sem status) costuma ser bloqueio de origem/CORS */
+    const m = String(err.message || err);
+    statusMail('Não foi possível enviar: ' +
+      (m === 'Failed to fetch'
+        ? `sem resposta do EmailJS. Verifique se ${location.origin} está na lista de Domains em Account › Security.`
+        : m), 'var(--alta)');
   }
 }
 
